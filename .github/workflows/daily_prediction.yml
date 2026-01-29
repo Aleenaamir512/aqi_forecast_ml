@@ -3,8 +3,8 @@ name: Daily AQI Forecast
 # Trigger workflow every day at 8 AM UTC
 on:
   schedule:
-    - cron: '0 8 * * *'  # Runs daily at 8:00 UTC
-  workflow_dispatch:     # Allows manual run from GitHub Actions tab
+    - cron: '04 4 * * *'  # This is 9 AM PKT in UTC
+  workflow_dispatch:       # still keep manual trigger if you want
 
 jobs:
   predict:
