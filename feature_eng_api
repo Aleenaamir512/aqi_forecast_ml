@@ -1,0 +1,105 @@
+import pandas as pd
+from pathlib import Path
+
+# Pickle file path
+file_path = Path(r"D:\aqi\clean_data.pkl")
+df = pd.read_pickle(file_path)
+
+
+print(df.head())
+
+df.info()
+df.shape
+df.columns
+
+# Basic Data Exploration
+# Display first few rows
+print(df.head())
+# Get summary statistics
+print(df.describe())
+# Check for missing values
+print(df.isna().sum())
+# Get data types of each column
+print(df.dtypes)
+# Memory usage
+print(df.memory_usage(deep=True))
+
+# Convert fetched_at to datetime
+df['fetched_at'] = pd.to_datetime(df['fetched_at'])
+
+# Extract date components
+df['hour'] = df['fetched_at'].dt.hour
+df['day'] = df['fetched_at'].dt.day
+df['month'] = df['fetched_at'].dt.month
+df['weekday'] = df['fetched_at'].dt.weekday
+
+# Check the structure of 'list' column
+print("\nSample of 'list' column:")
+print(df['list'].iloc[0])
+
+# Extract pollutants from the 'list' column and create lag features
+# The list column contains a list of dicts with 'components' key
+pollutants = ['pm2_5', 'pm10', 'no2', 'o3']
+
+def extract_pollutant(list_data, pollutant_name):
+    """Extract pollutant from list of dicts"""
+    if isinstance(list_data, list) and len(list_data) > 0:
+        first_item = list_data[0]
+        if isinstance(first_item, dict) and 'components' in first_item:
+            return first_item['components'].get(pollutant_name)
+    return None
+
+for pollutant in pollutants:
+    try:
+        df[pollutant] = df['list'].apply(lambda x: extract_pollutant(x, pollutant))
+        non_null_count = df[pollutant].notna().sum()
+        print(f"✓ {pollutant.upper()}: {non_null_count} non-null values out of {len(df)}")
+        # Create lag features (1 hour and 24 hours)
+        df[f'{pollutant}_lag1'] = df[pollutant].shift(1)
+        df[f'{pollutant}_lag3'] = df[pollutant].shift(3)
+
+    except Exception as e:
+        print(f"✗ Error processing {pollutant}: {e}")
+
+print("\nDataFrame shape after feature engineering:", df.shape)
+print("pm2_5 non-null count:", df['pm2_5'].notna().sum())
+print("\nSample pm2_5 values:")
+print(df['pm2_5'].head(30))
+
+#rolling average features
+df['pm2_5_roll3'] = df['pm2_5'].rolling(3, min_periods=1).mean()
+df['pm10_roll3'] = df['pm10'].rolling(3, min_periods=1).mean()
+df['no2_roll3'] = df['no2'].rolling(3, min_periods=1).mean()
+df['o3_roll3'] = df['o3'].rolling(3, min_periods=1).mean()
+
+print("✓ Rolling average features created")
+print("\nDataFrame shape after adding rolling averages:", df.shape)
+print("\nNew columns created for rolling averages:")
+print([col for col in df.columns if 'roll' in col])
+
+# First, only keep rows where pm2_5 (target variable) is not null
+df_before = df.copy()
+df = df[df['pm2_5'].notna()]
+print(f"\nAfter filtering for valid pm2_5 values: {df.shape[0]} rows (dropped {(df_before.shape[0] - df.shape[0])} rows)")
+
+if df.shape[0] == 0:
+    print("ERROR: No rows with pm2_5 values! Check your data.")
+    print("Sample of 'list' column:")
+    print(df_before['list'].head())
+else:
+    # Drop remaining rows with NaNs (from lag and rolling features)
+    required_cols = [
+    'pm2_5',
+    'pm2_5_lag1',
+    'pm2_5_lag3',
+    'pm2_5_roll3'
+]
+
+df = df.dropna(subset=required_cols)
+print("Final dataset shape:", df.shape)
+
+
+# Save the modified DataFrame to a new pickle file
+output_file_path = Path(r"D:\aqi\feature_engineered_data.pkl")
+df.to_pickle(output_file_path)
+print(f"✓ Feature engineered data saved to {output_file_path}")
