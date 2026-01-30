@@ -70,7 +70,6 @@ for day in range(1, 4):
     current_row['is_weekend'] = int(current_date.dayofweek >= 5)
 
     # ---- Keep pollution stable (short-term assumption) ----
-    # No change needed, values stay the same
     current_row['pm2.5'] = current_row['pm2.5']
     current_row['pm2_5_rolling_7'] = current_row['pm2_5_rolling_7']
 
@@ -116,14 +115,13 @@ plt.xlabel("Forecast Day")
 plt.ylabel("AQI")
 plt.title("3-Day AQI Forecast (Karachi)")
 plt.grid(True)
-plt.savefig(BASE_DIR / "aqi_3day_forecast.png")
+plt.savefig(BASE_DIR / "aqi_3day_forecast.png")  # saved locally
 plt.close()
-
 print("✓ AQI forecast plot saved")
 
 # =========================
 # 8. SAVE CSV
 # =========================
-output_csv = BASE_DIR / "aqi_3day_forecast.csv"
+output_csv = BASE_DIR / "aqi_3day_forecast.csv"  # saved locally
 forecast.to_csv(output_csv, index=False)
 print("✓ 3-day AQI forecast saved to aqi_3day_forecast.csv")
