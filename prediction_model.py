@@ -1,70 +1,100 @@
 import pandas as pd
 import joblib
 from pathlib import Path
-from datetime import datetime, timedelta
 
 # =========================
-# 1. LOAD FEATURE-ENGINEERED DATA
+# 1. LOAD FEATURE DATA
 # =========================
-feature_file = Path(r"D:\aqi\feature_engineered_historical_with_realtime.pkl")
+feature_file = Path("feature_engineered_historical_with_realtime.pkl")
 df = pd.read_pickle(feature_file)
 
 # =========================
-# 2. SELECT MODEL FEATURES
+# 2. MODEL FEATURES
 # =========================
 model_features = [
     'year', 'month', 'day', 'dayofweek', 'is_weekend',
     'pm2.5', 'pm10', 'no2', 'so2', 'co', 'o3',
-    'temperature', 'humidity', 'precipitation', 'pm2_5_rolling_7'
+    'temperature', 'humidity', 'precipitation',
+    'pm2_5_rolling_7'
 ]
 
-# =========================
-# 3. LOAD TRAINED MODEL
-# =========================
-model_file = Path(r"D:\aqi\XGBoost_karachi_aqi_model.pkl")
-model = joblib.load(model_file)
-print(f"✓ Model loaded from {model_file.name}")
+# Start from last available row
+current_row = df.iloc[[-1]].copy()
 
 # =========================
-# 4. PREDICT 3-DAY AQI ITERATIVELY
+# 3. LOAD MODEL
+# =========================
+model = joblib.load("XGBoost_karachi_aqi_model.pkl")
+print("✓ Model loaded")
+
+# =========================
+# 4. 3-DAY RECURSIVE PREDICTION
 # =========================
 predictions = []
-last_row = df.iloc[-1].copy()
 
-for day_ahead in range(1, 4):  # Predict day 1, 2, 3
-    # Create new date
-    new_date = last_row['date'] + timedelta(days=1)
-    
-    # Prepare new feature row
-    X_new = pd.DataFrame([{
-        'year': new_date.year,
-        'month': new_date.month,
-        'day': new_date.day,
-        'dayofweek': new_date.weekday(),
-        'is_weekend': new_date.weekday() >= 5,
-        'pm2.5': last_row['pm2.5'],          # Use last available PM2.5
-        'pm10': last_row['pm10'],
-        'no2': last_row['no2'],
-        'so2': last_row['so2'],
-        'co': last_row['co'],
-        'o3': last_row['o3'],
-        'temperature': last_row['temperature'],
-        'humidity': last_row['humidity'],
-        'precipitation': last_row['precipitation'],
-        'pm2_5_rolling_7': df['pm2.5'].iloc[-7:].mean()  # rolling 7-day mean
-    }])
+for day in range(1, 4):
+    X = current_row[model_features]
+    aqi_pred = model.predict(X)[0]
+    predictions.append(aqi_pred)
 
-    # Predict next-day AQI
-    next_aqi = model.predict(X_new[model_features])[0]
-    predictions.append((new_date.date(), next_aqi))
+    # ---- Update features for next day ----
+    # Keep pollution stable for short-term forecast
+    current_row['pm2.5'] = current_row['pm2.5']
+    current_row['pm2_5_rolling_7'] = current_row['pm2_5_rolling_7']
 
-    # Update last_row PM2.5 with prediction for next iteration
-    last_row['pm2.5'] = next_aqi
-    df = pd.concat([df, X_new], ignore_index=True)
+
+    current_row['day'] += 1
+    current_row['dayofweek'] = (current_row['dayofweek'] + 1) % 7
+    current_row['is_weekend'] = current_row['dayofweek'].isin([5, 6]).astype(int)
 
 # =========================
-# 5. PRINT 3-DAY PREDICTIONS
+# 5. OUTPUT
 # =========================
-print("✅ 3-Day AQI Predictions:")
-for date, aqi in predictions:
-    print(f"{date}: {aqi:.2f}")
+for i, pred in enumerate(predictions, start=1):
+    print(f"✅ Predicted AQI for Day {i}: {pred:.2f}")
+
+# =========================
+# 6. Labels for AQI Categories
+# =========================
+forecast = pd.DataFrame({
+    "day": ["Day 1", "Day 2", "Day 3"],
+    "predicted_aqi": predictions
+})
+
+def aqi_label(aqi):
+    if aqi <= 50: 
+        return "Good"
+    elif aqi <= 100: 
+        return "Moderate"
+    elif aqi <= 150: 
+        return "Unhealthy for Sensitive Groups"
+    elif aqi <= 200: 
+        return "Unhealthy"
+    else: 
+        return "Very Unhealthy"
+
+forecast["category"] = forecast["predicted_aqi"].apply(aqi_label)
+
+# ✅ Print forecast with categories to console
+print("\n3-Day AQI Forecast with Categories:")
+print(forecast)
+
+# =========================
+# 7. PLOT 3-DAY AQI TREND
+# =========================
+import matplotlib.pyplot as plt
+
+days = ["Day 1", "Day 2", "Day 3"]
+
+plt.plot(days, predictions, marker='o')  
+plt.xlabel("Forecast Day")
+plt.ylabel("AQI")
+plt.title("3-Day AQI Forecast (Karachi)")
+plt.grid(True)
+plt.show()
+
+# =========================
+# 8. Save predictions to CSV
+# =========================
+forecast.to_csv("aqi_3day_forecast.csv", index=False)
+print("✓ 3-day AQI forecast saved to aqi_3day_forecast.csv")
