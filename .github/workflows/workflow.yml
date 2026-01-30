@@ -1,0 +1,10 @@
+- name: Generate AQI forecast
+  run: python prediction_model.py
+
+- name: Upload forecast as artifact
+  uses: actions/upload-artifact@v3
+  with:
+    name: aqi-forecast
+    path: |
+      aqi_3day_forecast.csv
+      aqi_3day_forecast.png
