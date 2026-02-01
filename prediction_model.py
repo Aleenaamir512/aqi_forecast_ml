@@ -1,30 +1,43 @@
+# prediction_model_mongo.py
 from pathlib import Path
 import pandas as pd
 import joblib
-from datetime import timedelta
+from datetime import timedelta, datetime
 import matplotlib.pyplot as plt
+from pymongo import MongoClient
+import sys, os
+
+# Fix stdout encoding to handle unicode symbols
+sys.stdout.reconfigure(encoding='utf-8')
 
 # =========================
-# 0. BASE DIRECTORY
+# 0. BASE DIRECTORY & WORKING DIR
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
-print("Current working directory:", BASE_DIR)
+os.chdir(BASE_DIR)
 
 # =========================
-# 1. LOAD FEATURE DATA
+# 1. CONNECT TO MONGODB
 # =========================
-feature_file = BASE_DIR / "feature_engineered_historical_with_realtime.pkl"
-
-if not feature_file.exists():
-    raise FileNotFoundError(
-        f"{feature_file} NOT FOUND. Run feature engineering first."
-    )
-
-df = pd.read_pickle(feature_file)
-print("✓ Feature data loaded, shape:", df.shape)
+MONGO_URI = "mongodb+srv://aleenaamir02_db_user:zY4PRfUXbOplm3Ae@cluster0.km7h66h.mongodb.net/?appName=Cluster0"
+client = MongoClient(MONGO_URI)
+db = client["aqi_database"]
+collection_features = db["feature_store"]
+collection_forecast = db["aqi_forecast"]
 
 # =========================
-# 2. MODEL FEATURES
+# 2. LOAD FEATURE DATA FROM MONGO
+# =========================
+df = pd.DataFrame(list(collection_features.find()))
+if df.empty:
+    print("❌ No feature data found in MongoDB!")
+    sys.exit(1)
+
+df.drop(columns=["_id"], inplace=True, errors="ignore")
+print("✓ Feature data loaded from MongoDB:", df.shape)
+
+# =========================
+# 3. MODEL FEATURES
 # =========================
 model_features = [
     'year', 'month', 'day', 'dayofweek', 'is_weekend',
@@ -33,59 +46,62 @@ model_features = [
     'pm2_5_rolling_7'
 ]
 
-# Start from last available row
 current_row = df.iloc[[-1]].copy()
 
 # =========================
-# 3. LOAD MODEL
+# 4. LOAD MODEL
 # =========================
 model_path = BASE_DIR / "XGBoost_karachi_aqi_model.pkl"
-model = joblib.load(model_path)
+if not model_path.exists():
+    print(f"❌ Model file not found at {model_path}")
+    sys.exit(1)
+
+try:
+    model = joblib.load(model_path)
+except Exception as e:
+    print(f"❌ Failed to load model: {e}")
+    sys.exit(1)
+
 print("✓ Model loaded")
 
+from datetime import datetime
+
 # =========================
-# 4. 3-DAY RECURSIVE PREDICTION
+# 5. 3-DAY RECURSIVE PREDICTION
 # =========================
 predictions = []
 
-# ✅ Correct way to get last date
-last_date = pd.Timestamp(
-    year=int(df.iloc[-1]['year']),
-    month=int(df.iloc[-1]['month']),
-    day=int(df.iloc[-1]['day'])
-)
+# Start forecasting from tomorrow
+last_date = datetime.today()  # <-- change this line
 
 for day in range(1, 4):
-    X = current_row[model_features]
-    aqi_pred = model.predict(X)[0]
-    predictions.append(aqi_pred)
+    try:
+        X = current_row[model_features]
+        aqi_pred = model.predict(X)[0]
+        predictions.append(aqi_pred)
+    except Exception as e:
+        print(f"❌ Prediction failed on day {day}: {e}")
+        sys.exit(1)
 
-    # ---- Update date ----
+    # Update row for next day
     current_date = last_date + timedelta(days=day)
-
     current_row['year'] = current_date.year
     current_row['month'] = current_date.month
     current_row['day'] = current_date.day
-    current_row['dayofweek'] = current_date.dayofweek
-    current_row['is_weekend'] = int(current_date.dayofweek >= 5)
-
-    # ---- Keep pollution stable (short-term assumption) ----
+    current_row['dayofweek'] = current_date.weekday()
+    current_row['is_weekend'] = int(current_date.weekday() >= 5)
     current_row['pm2.5'] = current_row['pm2.5']
     current_row['pm2_5_rolling_7'] = current_row['pm2_5_rolling_7']
 
 # =========================
-# 5. PRINT OUTPUT
+# 6. CREATE FORECAST DATAFRAME
 # =========================
-for i, pred in enumerate(predictions, start=1):
-    print(f"✅ Predicted AQI for Day {i}: {pred:.2f}")
-
-# =========================
-# 6. AQI CATEGORIES
-# =========================
+forecast_dates = [(datetime.today() + timedelta(days=i)).strftime("%d %b %Y") for i in range(1, 4)]
 forecast = pd.DataFrame({
-    "day": ["Day 1", "Day 2", "Day 3"],
-    "predicted_aqi": predictions
+    "Date": forecast_dates,  # <-- use the next 3 days from today
+    "Predicted AQI": predictions
 })
+
 
 def aqi_label(aqi):
     if aqi <= 50:
@@ -99,29 +115,39 @@ def aqi_label(aqi):
     else:
         return "Very Unhealthy"
 
-forecast["category"] = forecast["predicted_aqi"].apply(aqi_label)
+forecast["Category"] = forecast["Predicted AQI"].apply(aqi_label)
 
 print("\n3-Day AQI Forecast with Categories:")
 print(forecast)
 
 # =========================
-# 7. PLOT 3-DAY AQI TREND
+# 7. PLOT 3-DAY TREND
 # =========================
-days = ["Day 1", "Day 2", "Day 3"]
+try:
+    plt.figure()
+    plt.plot(forecast["Date"], predictions, marker='o', linestyle='-', color='blue')
+    plt.xlabel("Date")
+    plt.ylabel("AQI")
+    plt.title("3-Day AQI Forecast (Karachi)")
+    plt.grid(True)
 
-plt.figure()
-plt.plot(days, predictions, marker='o')
-plt.xlabel("Forecast Day")
-plt.ylabel("AQI")
-plt.title("3-Day AQI Forecast (Karachi)")
-plt.grid(True)
-plt.savefig(BASE_DIR / "aqi_3day_forecast.png")  # saved locally
-plt.close()
-print("✓ AQI forecast plot saved")
+    # Add labels above points
+    for i, val in enumerate(predictions):
+        plt.text(i, val + 1, f"{val:.1f}", ha="center")
+
+    plt.savefig(BASE_DIR / "aqi_3day_forecast.png")
+    plt.close()
+    print("✓ AQI forecast plot saved")
+except Exception as e:
+    print(f"❌ Failed to plot forecast: {e}")
 
 # =========================
-# 8. SAVE CSV
+# 8. UPLOAD FORECAST TO MONGODB
 # =========================
-output_csv = BASE_DIR / "aqi_3day_forecast.csv"  # saved locally
-forecast.to_csv(output_csv, index=False)
-print("✓ 3-day AQI forecast saved to aqi_3day_forecast.csv")
+try:
+    forecast_dict = forecast.to_dict("records")
+    collection_forecast.delete_many({})  # optional: remove old forecast
+    collection_forecast.insert_many(forecast_dict)
+    print("✓ 3-day forecast uploaded to MongoDB")
+except Exception as e:
+    print(f"❌ Failed to upload forecast: {e}")

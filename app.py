@@ -1,73 +1,165 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from pymongo import MongoClient
+from pathlib import Path
+import subprocess
+import os
+from datetime import datetime, timedelta
 
 # =========================
-# 1. PAGE CONFIG
+# PAGE CONFIG
 # =========================
 st.set_page_config(
-    page_title="Karachi 3-Day AQI Forecast",
+    page_title="AQI Predictor Dashboard",
+    page_icon="🌤️",
     layout="centered"
 )
 
 # =========================
-# 2. TITLE & DESCRIPTION
+# STYLING
 # =========================
-st.title("🌆 Karachi 3-Day AQI Forecast")
-st.markdown(
-    "This app shows the predicted Air Quality Index (AQI) for the next 3 days in Karachi. "
-    "The AQI categories are color-coded for easy reference."
-)
+st.markdown("""
+<style>
+.main .block-container {
+    background-color: #FFF0F5;
+    padding: 2rem;
+    border-radius: 10px;
+}
+.stButton>button {
+    background-color: #0288D1;
+    color: white;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =========================
-# 3. LOAD FORECAST DATA
+# SIDEBAR: MODEL INFO
 # =========================
-try:
-    forecast = pd.read_csv("aqi_3day_forecast.csv")
-except FileNotFoundError:
-    st.error("Forecast CSV file not found. Make sure `aqi_3day_forecast.csv` is in the same folder.")
-    st.stop()
+st.sidebar.title("Model Information")
+st.sidebar.markdown("""
+**Best Model:** XGBoost Regressor  
+**R² Score:** 0.87  
+**RMSE:** 12.4  
+**Prediction Type:** Recursive 3-Day Forecast  
+**Data Source:** MongoDB Feature Store  
+""")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🌫 AQI Category Reference")
+st.sidebar.markdown("""
+🟢 **Good**  
+🟡 **Moderate**  
+🟠 **Unhealthy (Sensitive Groups)**  
+🔴 **Unhealthy**  
+⚫ **Very Unhealthy**
+""")
+st.sidebar.markdown("---")
+st.sidebar.info("⚠️ AQI values are predictive estimates, not official measurements.")
 
 # =========================
-# 4. ADD AQI CATEGORY LABELS
+# HEADER (MAIN PAGE)
 # =========================
-def aqi_label(aqi):
-    if aqi <= 50: return "🟢 Good"
-    elif aqi <= 100: return "🟡 Moderate"
-    elif aqi <= 150: return "🟠 Unhealthy for Sensitive Groups"
-    elif aqi <= 200: return "🔴 Unhealthy"
-    else: return "⚫ Very Unhealthy"
-
-forecast["AQI Category"] = forecast["predicted_aqi"].apply(aqi_label)
+st.title("Karachi AQI Predictor")
+st.write("3-day Air Quality Index (AQI) forecast using Machine Learning")
 
 # =========================
-# 5. DISPLAY TABLES
+# RUN PREDICTION
 # =========================
-st.subheader("3-Day Forecast Table")
-st.table(forecast[["day", "predicted_aqi", "AQI Category"]])
+if st.button("🔮 Generate 3-Day AQI Forecast"):
+
+    BASE_DIR = Path(__file__).resolve().parent
+    os.chdir(BASE_DIR)
+
+    with st.spinner("Running model & fetching latest forecast..."):
+        try:
+            subprocess.run(
+                ["python", "prediction_model.py"],
+                check=True
+            )
+        except Exception as e:
+            st.error("Prediction script failed.")
+            st.code(str(e))
+            st.stop()
+
+    # =========================
+    # CONNECT TO MONGODB
+    # =========================
+    MONGO_URI = "mongodb+srv://aleenaamir02_db_user:zY4PRfUXbOplm3Ae@cluster0.km7h66h.mongodb.net/?appName=Cluster0"
+    client = MongoClient(MONGO_URI)
+    db = client["aqi_database"]
+    collection = db["aqi_forecast"]
+
+    forecast = pd.DataFrame(list(collection.find()))
+    forecast.drop(columns=["_id"], inplace=True, errors="ignore")
+
+    if forecast.empty:
+        st.error("No forecast found in MongoDB.")
+        st.stop()
+
+    # =========================
+    # STANDARDIZE COLUMN NAMES
+    # =========================
+    forecast.columns = [col.lower() for col in forecast.columns]
+    if 'category' not in forecast.columns:
+        for col in forecast.columns:
+            if 'cat' in col:
+                forecast.rename(columns={col: 'category'}, inplace=True)
+
+    # =========================
+    # NEXT 3 DAYS DATES
+    # =========================
+    today = datetime.now()
+    next_3_dates = [(today + timedelta(days=i+1)).strftime("%d %b %Y") for i in range(3)]
+    forecast['Days'] = next_3_dates
+
+    # =========================
+    # AQI CATEGORY WITH ICONS
+    # =========================
+    def aqi_icon(cat):
+        return {
+            "Good": "🟢 Good",
+            "Moderate": "🟡 Moderate",
+            "Unhealthy for Sensitive Groups": "🟠 Unhealthy (Sensitive)",
+            "Unhealthy": "🔴 Unhealthy",
+            "Very Unhealthy": "⚫ Very Unhealthy"
+        }.get(cat, cat)
+
+    forecast["AQI Category"] = forecast["category"].apply(aqi_icon)
+
+    # =========================
+    # DISPLAY TABLE
+    # =========================
+    st.subheader("📋 3-Day AQI Forecast")
+    st.table(forecast[["Days", "predicted aqi", "AQI Category"]])
+
+    # =========================
+    # DISPLAY CHART
+    # =========================
+    st.subheader("📈 AQI Trend")
+    fig, ax = plt.subplots(figsize=(6, 3))  # smaller chart
+    ax.plot(
+        forecast["Days"],
+        forecast["predicted aqi"],
+        marker="o",
+        linestyle="-",
+        color="blue"
+    )
+    ax.set_xlabel("Date")
+    ax.set_ylabel("AQI")
+    ax.set_title("3-Day AQI Forecast (Karachi)")
+    ax.grid(True)
+
+    for i, val in enumerate(forecast["predicted aqi"]):
+        ax.text(i, val + 1, f"{val:.1f}", ha="center")
+
+    st.pyplot(fig)
 
 # =========================
-# 6. PLOT LINE CHART
+# FOOTER
 # =========================
-st.subheader("3-Day AQI Trend")
-fig, ax = plt.subplots()
-ax.plot(forecast["day"], forecast["predicted_aqi"], marker='o', linestyle='-', color='blue')
-ax.set_xlabel("Day")
-ax.set_ylabel("Predicted AQI")
-ax.set_title("AQI Forecast Trend")
-ax.grid(True)
-
-# Add category markers on chart
-for i, aqi in enumerate(forecast["predicted_aqi"]):
-    ax.text(i, aqi + 1, f"{int(aqi)}", ha='center')
-
-st.pyplot(fig)
-
-# =========================
-# 7. FOOTER
-# =========================
-st.markdown(
-    "---\n"
-    "⚠️ AQI values are **predicted estimates** and may differ from actual measurements.\n"
-    "📊 Data updated daily via GitHub Actions."
-)
+st.markdown("""
+---
+📡 Forecast updates when the model is executed.  
+""")
