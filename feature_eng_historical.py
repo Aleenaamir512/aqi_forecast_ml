@@ -1,21 +1,19 @@
+# feature_engineering_mongo.py
 import pandas as pd
 import requests
 from pathlib import Path
 from datetime import datetime
+from pymongo import MongoClient
 
 # =========================
 # 1. LOAD HISTORICAL CSV
 # =========================
 file_path = Path(r"D:\aqi\karachi_aqi.csv")
-
 df = pd.read_csv(file_path, sep=",", engine="python", on_bad_lines="skip")
-
-# Normalize column names
 df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
 
 print("✓ CSV loaded")
 print("Initial shape:", df.shape)
-print("Columns:", df.columns.tolist())
 
 # =========================
 # 2. DATE HANDLING
@@ -30,57 +28,29 @@ df = df.sort_values("date")
 df["year"] = df["date"].dt.year
 df["month"] = df["date"].dt.month
 df["day"] = df["date"].dt.day
-df["weekday"] = df["date"].dt.dayofweek
-df["is_weekend"] = df["weekday"] >= 5
+df["dayofweek"] = df["date"].dt.dayofweek
+df["is_weekend"] = df["dayofweek"] >= 5
 
-# Rolling 7-day PM2.5
 df["pm2_5_rolling_7"] = df["pm2.5"].rolling(7).mean().fillna(df["pm2.5"])
-
-
-# =========================
-# 4. TARGET VARIABLE
-# =========================
 df["pm25"] = df["pm2.5"]
 
 # =========================
-# 5. LAG FEATURES
+# 4. LAG & ROLLING FEATURES
 # =========================
 df["pm25_lag1"] = df["pm25"].shift(1)
 df["pm25_lag3"] = df["pm25"].shift(3)
+df["pm25_roll3"] = df["pm25"].rolling(3).mean()
+df["pm25_roll7"] = df["pm25"].rolling(7).mean()
 
-# =========================
-# 6. ROLLING FEATURES
-# =========================
-df["pm25_roll3"] = df["pm25"].rolling(window=3).mean()
-df["pm25_roll7"] = df["pm25"].rolling(window=7).mean()
-
-# =========================
-# 7. DROP NA VALUES
-# =========================
 required_cols = ["pm25", "pm25_lag1", "pm25_lag3", "pm25_roll3", "pm25_roll7"]
 before = df.shape[0]
 df = df.dropna(subset=required_cols)
 after = df.shape[0]
-
 print(f"Dropped {before - after} rows due to NaNs")
 print("Final dataset shape:", df.shape)
 
 # =========================
-# 8. FINAL FEATURE SET
-# =========================
-final_features = [
-    "day", "month", "weekday", "is_weekend",
-    "pm25_lag1", "pm25_lag3", "pm25_roll3", "pm25_roll7"
-]
-
-X = df[final_features]
-y = df["pm25"]
-
-print("Feature matrix shape:", X.shape)
-print("Target shape:", y.shape)
-
-# =========================
-# 9. FETCH REAL-TIME WAQI DATA
+# 5. FETCH REAL-TIME WAQI DATA
 # =========================
 WAQI_TOKEN = "f1b6e52a84f2193998bc5a0c04f130531583a24b"
 STATION_ID = "A544966"
@@ -90,63 +60,78 @@ try:
     resp = requests.get(api_url)
     resp.raise_for_status()
     data = resp.json()
-    
     if data["status"] == "ok":
-        aqi = data["data"]["aqi"]
         pollutants = data["data"]["iaqi"]
-        pm25_now = pollutants.get("pm25", {}).get("v", None)
-        pm10_now = pollutants.get("pm10", {}).get("v", None)
-        no2_now = pollutants.get("no2", {}).get("v", None)
-        so2_now = pollutants.get("so2", {}).get("v", None)
-        o3_now = pollutants.get("o3", {}).get("v", None)
-        co_now = pollutants.get("co", {}).get("v", None)
-
+        pm25_now = pollutants.get("pm25", {}).get("v")
+        pm10_now = pollutants.get("pm10", {}).get("v")
+        no2_now = pollutants.get("no2", {}).get("v")
+        so2_now = pollutants.get("so2", {}).get("v")
+        o3_now = pollutants.get("o3", {}).get("v")
+        co_now = pollutants.get("co", {}).get("v")
         print("✓ WAQI data fetched")
-        print(f"AQI: {aqi}, PM2.5: {pm25_now}, PM10: {pm10_now}")
     else:
-        print("⚠️ WAQI API returned error:", data.get("data"))
+        print("⚠️ WAQI API returned error")
+        pm25_now = pm10_now = no2_now = so2_now = o3_now = co_now = None
 except Exception as e:
     print("⚠️ Could not fetch WAQI API data:", e)
     pm25_now = pm10_now = no2_now = so2_now = o3_now = co_now = None
 
 # =========================
-# 10. ADD REAL-TIME DATA TO FEATURES
+# 6. APPEND LATEST ROW
 # =========================
-# You can append the real-time PM2.5 as the latest row for prediction
-from datetime import datetime
-
 latest_row = {
+    "date": datetime.now(),
     "year": datetime.now().year,
     "month": datetime.now().month,
     "day": datetime.now().day,
     "dayofweek": datetime.now().weekday(),
     "is_weekend": datetime.now().weekday() >= 5,
-    "pm2.5": pm25_now,  # from WAQI API
-    "pm10": pm10_now,   # from WAQI API
-    "no2": no2_now,     # from WAQI API
+    "pm2.5": pm25_now,
+    "pm10": pm10_now,
+    "no2": no2_now,
     "so2": so2_now,
     "co": co_now,
     "o3": o3_now,
-    "temperature": df["temperature"].iloc[-1],
-    "humidity": df["humidity"].iloc[-1],
-    "precipitation": df["precipitation"].iloc[-1],
-    "pm2_5_rolling_7": df["pm2.5"].iloc[-7:].mean()
+    "temperature": df["temperature"].iloc[-1] if "temperature" in df.columns else None,
+    "humidity": df["humidity"].iloc[-1] if "humidity" in df.columns else None,
+    "precipitation": df["precipitation"].iloc[-1] if "precipitation" in df.columns else None,
+    "pm2_5_rolling_7": df["pm2.5"].iloc[-7:].mean(),
+    "pm25": pm25_now,
+    "pm25_lag1": df["pm25"].iloc[-1] if len(df) >= 1 else None,
+    "pm25_lag3": df["pm25"].iloc[-3] if len(df) >= 3 else None,
+    "pm25_roll3": df["pm25_roll3"].iloc[-1] if len(df) >= 1 else None,
+    "pm25_roll7": df["pm25_roll7"].iloc[-1] if len(df) >= 1 else None,
 }
 
-
-
-
-
-X_real_time = pd.DataFrame([latest_row])
-print("Real-time feature row ready:")
-print(X_real_time)
-
-
-df.rename(columns={"weekday": "dayofweek"}, inplace=True)
+df = pd.concat([df, pd.DataFrame([latest_row])], ignore_index=True)
 
 # =========================
-# 11. SAVE FEATURE ENGINEERED DATA
+# 7. CLEAN DATA FOR MONGODB
+# =========================
+for col in df.columns:
+    if pd.api.types.is_datetime64_any_dtype(df[col]):
+        df[col] = df[col].apply(lambda x: x.to_pydatetime() if pd.notnull(x) else None)
+    else:
+        df[col] = df[col].where(pd.notnull(df[col]), None)
+
+print("✓ Latest real-time row appended and cleaned")
+
+# =========================
+# 8. SAVE FEATURE ENGINEERED DATA LOCALLY
 # =========================
 output_path = Path(r"D:\aqi\feature_engineered_historical_with_realtime.pkl")
 df.to_pickle(output_path)
 print(f"✓ Feature engineered data saved to {output_path}")
+
+# =========================
+# 9. UPLOAD TO MONGODB
+# =========================
+MONGO_URI = "mongodb+srv://aleenaamir02_db_user:zY4PRfUXbOplm3Ae@cluster0.km7h66h.mongodb.net/?appName=Cluster0"
+client = MongoClient(MONGO_URI)
+db = client["aqi_database"]
+collection = db["feature_store"]
+
+collection.delete_many({})
+collection.insert_many(df.to_dict("records"))
+
+print("✓ Feature data uploaded to MongoDB:", collection.count_documents({}), "records")
