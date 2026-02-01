@@ -1,0 +1,45 @@
+name: Daily AQI Prediction
+
+# Runs daily at 2 AM Pakistan time (UTC+5 => 21:00 UTC previous day)
+on:
+  workflow_dispatch:  # manual trigger
+  schedule:
+    - cron: "21 21 * * *"  # daily 2 AM PKT
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn xgboost joblib matplotlib requests pymongo
+
+      - name: Run AQI prediction
+        env:
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+        run: |
+          python feature_eng_historical.py
+          python prediction_model.py
+
+      - name: Upload AQI forecast CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: aqi-forecast-csv
+          path: aqi_3day_forecast.csv
+
+      - name: Upload AQI forecast plot
+        uses: actions/upload-artifact@v4
+        with:
+          name: aqi-forecast-plot
+          path: aqi_3day_forecast.png
