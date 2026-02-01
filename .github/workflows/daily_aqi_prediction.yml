@@ -29,7 +29,7 @@ jobs:
           WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
           MONGO_URI: ${{ secrets.MONGO_URI }}
         run: |
-          python feature_engineering_mongo.py
+          python feature_eng_historical.py
           python prediction_model.py
 
       - name: Upload AQI forecast CSV
