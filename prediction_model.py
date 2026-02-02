@@ -19,8 +19,14 @@ os.chdir(BASE_DIR)
 # =========================
 # 1. CONNECT TO MONGODB
 # =========================
-MONGO_URI = "mongodb+srv://aleenaamir02_db_user:zY4PRfUXbOplm3Ae@cluster0.km7h66h.mongodb.net/?appName=Cluster0"
+import os
+from pymongo import MongoClient
+
+MONGO_URI = os.getenv("MONGO_URI")
+
 client = MongoClient(MONGO_URI)
+db = client["aqi_db"]   # your database name
+
 db = client["aqi_database"]
 collection_features = db["feature_store"]
 collection_forecast = db["aqi_forecast"]
