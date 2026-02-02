@@ -77,8 +77,11 @@ def run_prediction():
     import prediction_model  # your script should define forecast dataframe after running
 
     # Connect to MongoDB
-    MONGO_URI = "mongodb+srv://aleenaamir02_db_user:zY4PRfUXbOplm3Ae@cluster0.km7h66h.mongodb.net/?appName=Cluster0"
+    from pymongo import MongoClient
+
+    MONGO_URI = st.secrets["MONGO_URI"]
     client = MongoClient(MONGO_URI)
+
     db = client["aqi_database"]
     collection = db["aqi_forecast"]
 
@@ -140,8 +143,10 @@ if st.button("🔮 Generate 3-Day AQI Forecast"):
                 ax.set_ylabel("AQI")
                 ax.set_title("3-Day AQI Forecast (Karachi)")
                 ax.grid(True)
+                offset = max(forecast["predicted aqi"]) * 0.02
                 for i, val in enumerate(forecast["predicted aqi"]):
-                    ax.text(i, val + 1, f"{val:.1f}", ha="center")
+                    ax.text(i, val + offset, f"{val:.1f}", ha="center", va="bottom")
+
                 st.pyplot(fig)
 
         except Exception as e:
