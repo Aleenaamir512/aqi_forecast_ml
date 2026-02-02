@@ -2,12 +2,13 @@
 from pathlib import Path
 import pandas as pd
 import joblib
-from datetime import timedelta
+from datetime import timedelta, datetime
 import matplotlib.pyplot as plt
 from pymongo import MongoClient
-import sys, os
+import os
+import sys
 
-# Ensure UTF-8 output
+# Ensure UTF-8 printing
 sys.stdout.reconfigure(encoding='utf-8')
 
 # =========================
@@ -17,14 +18,14 @@ BASE_DIR = Path(__file__).resolve().parent
 os.chdir(BASE_DIR)
 
 # =========================
-# 1. MONGODB CONNECTION
+# 1. CONNECT TO MONGODB USING ENV SECRET
 # =========================
-import os
-from pymongo import MongoClient
-
 MONGO_URI = os.environ.get("MONGO_URI")
-client = MongoClient(MONGO_URI)
+if not MONGO_URI:
+    print("❌ MONGO_URI environment variable not set!")
+    sys.exit(1)
 
+client = MongoClient(MONGO_URI)
 db = client["aqi_database"]
 collection_features = db["feature_store"]
 collection_forecast = db["aqi_forecast"]
@@ -41,22 +42,14 @@ df.drop(columns=["_id"], inplace=True, errors="ignore")
 print(f"✅ Feature data loaded: {df.shape}")
 
 # =========================
-# 3. MODEL FEATURES (must match training)
+# 3. MODEL FEATURES (must match trained model)
 # =========================
 model_features = [
     'year', 'month', 'day', 'dayofweek', 'is_weekend',
     'pm2.5', 'pm10', 'no2', 'so2', 'co', 'o3',
     'temperature', 'humidity', 'precipitation',
-    'pm2_5_rolling_7'
+    'pm2_5_roll7'  # match model column exactly
 ]
-
-# Keep only these columns
-missing_cols = [col for col in model_features if col not in df.columns]
-if missing_cols:
-    print(f"❌ Missing columns in data for model: {missing_cols}")
-    sys.exit(1)
-
-current_row = df[model_features].iloc[[-1]].copy()
 
 # =========================
 # 4. LOAD MODEL
@@ -75,35 +68,47 @@ except Exception as e:
 print("✅ Model loaded")
 
 # =========================
-# 5. 3-DAY RECURSIVE PREDICTION
+# 5. PREPARE ROW FOR PREDICTION
+# =========================
+current_row = df.iloc[[-1]].copy()
+
+# Rename column if it came differently from MongoDB
+if "pm2_5_rolling_7" in current_row.columns:
+    current_row.rename(columns={"pm2_5_rolling_7": "pm2_5_roll7"}, inplace=True)
+
+# Ensure only model features are selected
+current_row = current_row[model_features]
+
+# =========================
+# 6. 3-DAY FORECAST
 # =========================
 predictions = []
 forecast_dates = []
 
-last_date = pd.Timestamp(
-    year=int(df.iloc[-1]['year']),
-    month=int(df.iloc[-1]['month']),
-    day=int(df.iloc[-1]['day'])
-)
+last_date = pd.Timestamp(year=int(df.iloc[-1]['year']),
+                         month=int(df.iloc[-1]['month']),
+                         day=int(df.iloc[-1]['day']))
 
 for i in range(1, 4):
-    # Predict AQI
+    # Predict
     pred = model.predict(current_row)[0]
-    predictions.append(round(float(pred), 2))
+    predictions.append(pred)
 
-    # Calculate next day's date
+    # Next date
     next_date = last_date + timedelta(days=i)
     forecast_dates.append(next_date.strftime("%d %b %Y"))
 
-    # Update date-related features for next prediction
+    # Update features for next day
     current_row['year'] = next_date.year
     current_row['month'] = next_date.month
     current_row['day'] = next_date.day
     current_row['dayofweek'] = next_date.dayofweek
     current_row['is_weekend'] = int(next_date.dayofweek >= 5)
+    # Keep rolling feature same (or update if you have logic)
+    current_row['pm2_5_roll7'] = current_row['pm2_5_roll7']
 
 # =========================
-# 6. CREATE FORECAST DATAFRAME
+# 7. CREATE FORECAST DATAFRAME
 # =========================
 forecast = pd.DataFrame({
     "Date": forecast_dates,
@@ -128,19 +133,16 @@ print("\n✅ 3-Day AQI Forecast:")
 print(forecast)
 
 # =========================
-# 7. PLOT TREND
+# 8. PLOT FORECAST
 # =========================
 try:
-    plt.figure(figsize=(6, 4))  # smaller chart
+    plt.figure(figsize=(6,4))  # smaller figure
     plt.plot(forecast["Date"], forecast["Predicted AQI"], marker='o', linestyle='-', color='blue')
     plt.xlabel("Date")
     plt.ylabel("AQI")
     plt.title("3-Day AQI Forecast (Karachi)")
     plt.grid(True)
-
-    for i, val in enumerate(forecast["Predicted AQI"]):
-        plt.text(i, val + 1, f"{val:.1f}", ha="center")
-
+    plt.tight_layout()
     plt.savefig(BASE_DIR / "aqi_3day_forecast.png")
     plt.close()
     print("✅ AQI forecast plot saved")
@@ -148,11 +150,11 @@ except Exception as e:
     print(f"❌ Failed to plot forecast: {e}")
 
 # =========================
-# 8. UPLOAD FORECAST TO MONGODB
+# 9. UPLOAD FORECAST TO MONGODB
 # =========================
 try:
     forecast_dict = forecast.to_dict("records")
-    collection_forecast.delete_many({})  # clear old forecast
+    collection_forecast.delete_many({})  # remove old forecast
     collection_forecast.insert_many(forecast_dict)
     print("✅ 3-day forecast uploaded to MongoDB")
 except Exception as e:
