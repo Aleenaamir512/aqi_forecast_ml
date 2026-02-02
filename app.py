@@ -39,9 +39,10 @@ st.markdown("""
 # =========================
 st.sidebar.title("Model Information")
 st.sidebar.markdown("""
-**Best Model:** XGBoost Regressor  
+**Best Model:** Random Forest Regressor  
 **R² Score:** 0.87  
-**RMSE:** 12.4  
+**RMSE:** 12.4   
+**MAE:** 7.60  
 **Prediction Type:** Recursive 3-Day Forecast  
 **Data Source:** MongoDB Feature Store  
 """)
