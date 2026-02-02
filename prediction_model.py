@@ -61,7 +61,7 @@ current_row = df[model_features].iloc[[-1]].copy()
 # =========================
 # 4. LOAD MODEL
 # =========================
-model_path = BASE_DIR / "XGBoost_karachi_aqi_model.pkl"
+model_path = BASE_DIR / "RandomForest_karachi_aqi_model.pkl"
 if not model_path.exists():
     print(f"❌ Model file not found at {model_path}")
     sys.exit(1)
