@@ -1,38 +1,36 @@
-# prediction_model_mongo.py
+# prediction_model.py
 from pathlib import Path
 import pandas as pd
 import joblib
-from datetime import timedelta, datetime
+from datetime import timedelta
 import matplotlib.pyplot as plt
 from pymongo import MongoClient
 import sys, os
 
-# Fix stdout encoding to handle unicode symbols
+# Ensure UTF-8 output
 sys.stdout.reconfigure(encoding='utf-8')
 
 # =========================
-# 0. BASE DIRECTORY & WORKING DIR
+# 0. BASE DIRECTORY
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
 os.chdir(BASE_DIR)
 
 # =========================
-# 1. CONNECT TO MONGODB
+# 1. MONGODB CONNECTION
 # =========================
 import os
 from pymongo import MongoClient
 
-MONGO_URI = os.getenv("MONGO_URI")
-
+MONGO_URI = os.environ.get("MONGO_URI")
 client = MongoClient(MONGO_URI)
-db = client["aqi_db"]   # your database name
 
 db = client["aqi_database"]
 collection_features = db["feature_store"]
 collection_forecast = db["aqi_forecast"]
 
 # =========================
-# 2. LOAD FEATURE DATA FROM MONGO
+# 2. LOAD FEATURE DATA
 # =========================
 df = pd.DataFrame(list(collection_features.find()))
 if df.empty:
@@ -40,10 +38,10 @@ if df.empty:
     sys.exit(1)
 
 df.drop(columns=["_id"], inplace=True, errors="ignore")
-print("✓ Feature data loaded from MongoDB:", df.shape)
+print(f"✅ Feature data loaded: {df.shape}")
 
 # =========================
-# 3. MODEL FEATURES
+# 3. MODEL FEATURES (must match training)
 # =========================
 model_features = [
     'year', 'month', 'day', 'dayofweek', 'is_weekend',
@@ -52,7 +50,13 @@ model_features = [
     'pm2_5_rolling_7'
 ]
 
-current_row = df.iloc[[-1]].copy()
+# Keep only these columns
+missing_cols = [col for col in model_features if col not in df.columns]
+if missing_cols:
+    print(f"❌ Missing columns in data for model: {missing_cols}")
+    sys.exit(1)
+
+current_row = df[model_features].iloc[[-1]].copy()
 
 # =========================
 # 4. LOAD MODEL
@@ -68,46 +72,43 @@ except Exception as e:
     print(f"❌ Failed to load model: {e}")
     sys.exit(1)
 
-print("✓ Model loaded")
-
-from datetime import datetime
+print("✅ Model loaded")
 
 # =========================
 # 5. 3-DAY RECURSIVE PREDICTION
 # =========================
 predictions = []
+forecast_dates = []
 
-# Start forecasting from tomorrow
-last_date = datetime.today()  # <-- change this line
+last_date = pd.Timestamp(
+    year=int(df.iloc[-1]['year']),
+    month=int(df.iloc[-1]['month']),
+    day=int(df.iloc[-1]['day'])
+)
 
-for day in range(1, 4):
-    try:
-        X = current_row[model_features]
-        aqi_pred = model.predict(X)[0]
-        predictions.append(aqi_pred)
-    except Exception as e:
-        print(f"❌ Prediction failed on day {day}: {e}")
-        sys.exit(1)
+for i in range(1, 4):
+    # Predict AQI
+    pred = model.predict(current_row)[0]
+    predictions.append(round(float(pred), 2))
 
-    # Update row for next day
-    current_date = last_date + timedelta(days=day)
-    current_row['year'] = current_date.year
-    current_row['month'] = current_date.month
-    current_row['day'] = current_date.day
-    current_row['dayofweek'] = current_date.weekday()
-    current_row['is_weekend'] = int(current_date.weekday() >= 5)
-    current_row['pm2.5'] = current_row['pm2.5']
-    current_row['pm2_5_rolling_7'] = current_row['pm2_5_rolling_7']
+    # Calculate next day's date
+    next_date = last_date + timedelta(days=i)
+    forecast_dates.append(next_date.strftime("%d %b %Y"))
+
+    # Update date-related features for next prediction
+    current_row['year'] = next_date.year
+    current_row['month'] = next_date.month
+    current_row['day'] = next_date.day
+    current_row['dayofweek'] = next_date.dayofweek
+    current_row['is_weekend'] = int(next_date.dayofweek >= 5)
 
 # =========================
 # 6. CREATE FORECAST DATAFRAME
 # =========================
-forecast_dates = [(datetime.today() + timedelta(days=i)).strftime("%d %b %Y") for i in range(1, 4)]
 forecast = pd.DataFrame({
-    "Date": forecast_dates,  # <-- use the next 3 days from today
+    "Date": forecast_dates,
     "Predicted AQI": predictions
 })
-
 
 def aqi_label(aqi):
     if aqi <= 50:
@@ -123,27 +124,26 @@ def aqi_label(aqi):
 
 forecast["Category"] = forecast["Predicted AQI"].apply(aqi_label)
 
-print("\n3-Day AQI Forecast with Categories:")
+print("\n✅ 3-Day AQI Forecast:")
 print(forecast)
 
 # =========================
-# 7. PLOT 3-DAY TREND
+# 7. PLOT TREND
 # =========================
 try:
-    plt.figure()
-    plt.plot(forecast["Date"], predictions, marker='o', linestyle='-', color='blue')
+    plt.figure(figsize=(6, 4))  # smaller chart
+    plt.plot(forecast["Date"], forecast["Predicted AQI"], marker='o', linestyle='-', color='blue')
     plt.xlabel("Date")
     plt.ylabel("AQI")
     plt.title("3-Day AQI Forecast (Karachi)")
     plt.grid(True)
 
-    # Add labels above points
-    for i, val in enumerate(predictions):
+    for i, val in enumerate(forecast["Predicted AQI"]):
         plt.text(i, val + 1, f"{val:.1f}", ha="center")
 
     plt.savefig(BASE_DIR / "aqi_3day_forecast.png")
     plt.close()
-    print("✓ AQI forecast plot saved")
+    print("✅ AQI forecast plot saved")
 except Exception as e:
     print(f"❌ Failed to plot forecast: {e}")
 
@@ -152,8 +152,8 @@ except Exception as e:
 # =========================
 try:
     forecast_dict = forecast.to_dict("records")
-    collection_forecast.delete_many({})  # optional: remove old forecast
+    collection_forecast.delete_many({})  # clear old forecast
     collection_forecast.insert_many(forecast_dict)
-    print("✓ 3-day forecast uploaded to MongoDB")
+    print("✅ 3-day forecast uploaded to MongoDB")
 except Exception as e:
     print(f"❌ Failed to upload forecast: {e}")
