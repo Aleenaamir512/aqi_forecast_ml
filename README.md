@@ -47,10 +47,10 @@ GitHub Actions is used to automate:
 
 **Tech Stack**
 
-Python (Pandas, NumPy, Scikit-learn)
-MongoDB
-Streamlit
-GitHub Actions
+Python (Pandas, NumPy, Scikit-learn)  
+MongoDB  
+Streamlit  
+GitHub Actions  
 
 **How to Run Locally**
 
