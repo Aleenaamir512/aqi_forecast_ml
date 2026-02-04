@@ -63,3 +63,6 @@ pip install -r requirements.txt
 - Run the Streamlit app
   streamlit run app.py
 
+**Project Report**
+
+The detailed project report explaining data collection, EDA, feature engineering, model training and deployement is available in the 'docs' folder. 
