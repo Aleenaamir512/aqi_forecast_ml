@@ -63,6 +63,11 @@ pip install -r requirements.txt
 - Run the Streamlit app
   streamlit run app.py
 
+**How to Run Publicly**
+
+Click the link below to access the deployed AQI Prediction Web App:
+🔗 https://aqipredictorbyaleena.streamlit.app/
+
 **Project Report**
 
 The detailed project report explaining data collection, EDA, feature engineering, model training and deployement is available in the 'docs' folder. 
