@@ -7,18 +7,14 @@ from datetime import datetime, timedelta
 import sys
 import os
 
-# =========================
-# PAGE CONFIG
-# =========================
+
 st.set_page_config(
     page_title="AQI Predictor Dashboard",
     page_icon="🌤️",
     layout="centered"
 )
 
-# =========================
-# STYLING
-# =========================
+
 st.markdown("""
 <style>
 .main .block-container {
@@ -34,9 +30,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# =========================
-# SIDEBAR: MODEL INFO
-# =========================
+
 st.sidebar.title("Model Information")
 st.sidebar.markdown("""
 **Best Model:** Random Forest Regressor  
@@ -59,28 +53,26 @@ st.sidebar.markdown("""
 st.sidebar.markdown("---")
 st.sidebar.info("⚠️ AQI values are predictive estimates, not official measurements.")
 
-# =========================
-# HEADER (MAIN PAGE)
-# =========================
+#header
 st.title("Karachi AQI Predictor")
 st.write("3-day Air Quality Index (AQI) forecast using Machine Learning")
 
-# =========================
-# FUNCTION TO RUN MODEL
-# =========================
+#function
 def run_prediction():
-    # Make sure current working directory is the script directory
+    
     BASE_DIR = Path(__file__).resolve().parent
     os.chdir(BASE_DIR)
     
-    # Import prediction_model here so it runs in same Python process
-    import prediction_model  # your script should define forecast dataframe after running
+    import prediction_model  
 
-    # Connect to MongoDB
+    import streamlit as st
     from pymongo import MongoClient
 
     MONGO_URI = st.secrets["MONGO_URI"]
     client = MongoClient(MONGO_URI)
+    db = client["aqi_database"]
+    collection = db["aqi_forecast"]
+
 
     db = client["aqi_database"]
     collection = db["aqi_forecast"]
@@ -92,19 +84,18 @@ def run_prediction():
         st.error("No forecast found in MongoDB.")
         return None
 
-    # Standardize column names
     forecast.columns = [col.lower() for col in forecast.columns]
     if 'category' not in forecast.columns:
         for col in forecast.columns:
             if 'cat' in col:
                 forecast.rename(columns={col: 'category'}, inplace=True)
 
-    # Next 3 days dates
+    #for next 3 days
     today = datetime.now()
     next_3_dates = [(today + timedelta(days=i+1)).strftime("%d %b %Y") for i in range(3)]
     forecast['days'] = next_3_dates
 
-    # AQI category icons
+    #aqi category
     def aqi_icon(cat):
         return {
             "Good": "🟢 Good",
@@ -117,45 +108,49 @@ def run_prediction():
     forecast["AQI Category"] = forecast["category"].apply(aqi_icon)
     return forecast
 
-# =========================
-# RUN PREDICTION BUTTON
-# =========================
+#button
 if st.button("🔮 Generate 3-Day AQI Forecast"):
     with st.spinner("Running model & fetching latest forecast..."):
         try:
             forecast = run_prediction()
             if forecast is not None:
-                # Display Table
+                #table
                 st.subheader("📋 3-Day AQI Forecast")
                 st.table(forecast[["days", "predicted aqi", "AQI Category"]])
 
-                # Display Chart
-                st.subheader("📈 AQI Trend")
-                fig, ax = plt.subplots(figsize=(6, 3))
+                #chart
+                st.subheader(" AQI Trend")
+                fig, ax = plt.subplots(figsize=(8, 4))
+                #plotting aqi values
                 ax.plot(
                     forecast["days"],
                     forecast["predicted aqi"],
                     marker="o",
                     linestyle="-",
-                    color="blue"
+                    color="blue",
+                    linewidth=2
                 )
-                ax.set_xlabel("Date")
-                ax.set_ylabel("AQI")
-                ax.set_title("3-Day AQI Forecast (Karachi)")
-                ax.grid(True)
-                offset = max(forecast["predicted aqi"]) * 0.02
-                for i, val in enumerate(forecast["predicted aqi"]):
-                    ax.text(i, val + offset, f"{val:.1f}", ha="center", va="bottom")
 
-                st.pyplot(fig)
+                #labels and title 
+                ax.set_xlabel("Date")
+                ax.set_ylabel("Predicted AQI")
+                ax.set_title("3-Day AQI Forecast (Karachi)")
+                ax.grid(True, linestyle="--", alpha=0.6)
+                plt.xticks(rotation=30)
+
+                #annotations
+                offset = max(forecast["predicted aqi"]) * 0.02
+                for x, val in zip(forecast["days"], forecast["predicted aqi"]):
+                 pass 
+
+                
+                st.pyplot(fig)  
 
         except Exception as e:
-            st.error("Prediction failed!")
-            st.code(str(e))
 
-# =========================
-# FOOTER
-# =========================
+                st.error("Prediction failed!")
+                st.code(str(e))
+
 st.markdown("""
 ---
 📡 Forecast updates when the model is executed.  
