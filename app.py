@@ -114,9 +114,15 @@ if st.button("🔮 Generate 3-Day AQI Forecast"):
         try:
             forecast = run_prediction()
             if forecast is not None:
+                display_forecast = forecast.rename(columns={
+                    "days": "Date",
+                    "predicted aqi": "Predicted AQI",
+                    "AQI Category": "AQI Category"
+                })
                 #table
                 st.subheader("📋 3-Day AQI Forecast")
-                st.table(forecast[["days", "predicted aqi", "AQI Category"]])
+                st.dataframe(
+                    display_forecast[["Date", "Predicted AQI", "AQI Category"]]) 
 
                 #chart
                 st.subheader(" AQI Trend")
