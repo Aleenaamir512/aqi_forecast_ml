@@ -129,7 +129,7 @@ if st.button("Generate Now"):
                     display_forecast[["Date", "Predicted AQI", "AQI Category"]]) 
 
                 #chart
-                st.subheader(" AQI Trend")
+                st.subheader("📈 AQI Trend")
                 fig, ax = plt.subplots(figsize=(8, 4))
                 #plotting aqi values
                 ax.plot(
