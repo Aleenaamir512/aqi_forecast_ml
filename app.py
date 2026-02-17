@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 import sys
 import os
 
-
+st.cache_data.clear()
 st.set_page_config(
     page_title="AQI Predictor Dashboard",
     page_icon="🌤️",
