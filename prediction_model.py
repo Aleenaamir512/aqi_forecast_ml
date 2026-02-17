@@ -47,13 +47,18 @@ print("Model loaded")
 current_row = df.iloc[[-1]].copy()
 if "pm2_5_rolling_7" in current_row.columns:
     current_row.rename(columns={"pm2_5_rolling_7": "pm2_5_roll7"}, inplace=True)
-current_row = current_row[model_features]
+    current_row = current_row[model_features]
 #3-day forecast
 predictions = []
 forecast_dates = []
-last_date = pd.Timestamp(year=int(df.iloc[-1]['year']),
-                         month=int(df.iloc[-1]['month']),
-                         day=int(df.iloc[-1]['day']))
+from datetime import date
+
+last_date = date(
+    int(df.iloc[-1]['year']),
+    int(df.iloc[-1]['month']),
+    int(df.iloc[-1]['day'])
+)
+
 for i in range(1, 4):
     #predict
     pred = model.predict(current_row)[0]
@@ -65,8 +70,9 @@ for i in range(1, 4):
     current_row['year'] = next_date.year
     current_row['month'] = next_date.month
     current_row['day'] = next_date.day
-    current_row['dayofweek'] = next_date.dayofweek
-    current_row['is_weekend'] = int(next_date.dayofweek >= 5)
+    current_row['dayofweek'] = next_date.weekday()
+    current_row['is_weekend'] = int(next_date.weekday() >= 5)
+
     #rolling features
     current_row['pm2_5_roll7'] = current_row['pm2_5_roll7']
 #forecast dataframe
