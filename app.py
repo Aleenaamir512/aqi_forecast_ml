@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pymongo import MongoClient
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import sys
 import os
 
@@ -91,9 +91,13 @@ def run_prediction():
                 forecast.rename(columns={col: 'category'}, inplace=True)
 
     #for next 3 days
-    today = datetime.now()
-    next_3_dates = [(today + timedelta(days=i+1)).strftime("%d %b %Y") for i in range(3)]
+    from datetime import date, timedelta
+
+    num_days = len(forecast)
+    today = date.today()
+    next_3_dates = [(today + timedelta(days=i+1)).strftime("%d %b %Y") for i in range(num_days)]
     forecast['days'] = next_3_dates
+
 
     #aqi category
     def aqi_icon(cat):
@@ -109,7 +113,7 @@ def run_prediction():
     return forecast
 
 #button
-if st.button("🔮 Generate 3-Day AQI Forecast"):
+if st.button("Generate Now"):
     with st.spinner("Running model & fetching latest forecast..."):
         try:
             forecast = run_prediction()
